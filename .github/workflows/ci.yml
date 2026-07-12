@@ -202,13 +202,11 @@ jobs:
         sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu pkg-config
         echo "=== ARM64 Toolchain Installed ==="
         aarch64-linux-gnu-gcc --version
-        aarch64-linux-gnu-g++ --version
-        aarch64-linux-gnu-ar --version
 
     - name: Download and cross-compile Radare2 for ARM64
       run: |
-        git clone --depth=1 --branch "${R2V}" https://github.com/radareorg/radare2
-        cd radare2
+        git clone --depth=1 --branch "${R2V}" https://github.com/radareorg/radare2 radare2-src
+        cd radare2-src
         echo "=== Cross-compiling Radare2 for ARM64 ==="
         export CC=aarch64-linux-gnu-gcc
         export CXX=aarch64-linux-gnu-g++
@@ -216,13 +214,11 @@ jobs:
         export LD=aarch64-linux-gnu-ld
         export CFLAGS="-O2 -march=armv8-a"
         export CXXFLAGS="-O2 -march=armv8-a"
-        export LDFLAGS="-L/tmp/r2-arm64-install/lib"
         ./configure --prefix=/tmp/r2-arm64-install --host=aarch64-linux-gnu --enable-shared
         make -j4
         make install
         cd ..
         echo "=== Radare2 ARM64 build completed ==="
-        ls -lh /tmp/r2-arm64-install/lib/libr_*.so* 2>/dev/null | head -5
 
     - name: Cross-compile r2ghidra for ARM64
       run: |
@@ -236,7 +232,7 @@ jobs:
         export LDFLAGS="-L/tmp/r2-arm64-install/lib"
         export PKG_CONFIG_PATH=/tmp/r2-arm64-install/lib/pkgconfig
         export LD_LIBRARY_PATH=/tmp/r2-arm64-install/lib:$LD_LIBRARY_PATH
-        export PATH=$PATH:/tmp/r2-arm64-install/bin
+        export PATH=/tmp/r2-arm64-install/bin:$PATH
         ./preconfigure
         ./configure --prefix=/tmp/r2ghidra-arm64-install --host=aarch64-linux-gnu --with-radare2=/tmp/r2-arm64-install
         make -j4
@@ -244,247 +240,33 @@ jobs:
         echo "=== r2ghidra ARM64 build completed ==="
 
     - name: Creating distribution artifact structure
+      if: success()
       run: |
         set -e
         DIST_DIR="artifacts/r2ghidra-linux-arm64-full"
-        mkdir -p "${DIST_DIR}/headers"
-        mkdir -p "${DIST_DIR}/plugins"
-        mkdir -p "${DIST_DIR}/objects"
-        mkdir -p "${DIST_DIR}/sleigh"
-        mkdir -p "${DIST_DIR}/libs"
-
-        echo "=== Collecting Headers ==="
-        # Copy headers with original directory structure
-        if [ -d "src" ]; then
-          mkdir -p "${DIST_DIR}/headers/src"
-          find src -name "*.h" -type f 2>/dev/null | while read hdr; do
-            cp --parents "$hdr" "${DIST_DIR}/headers/" 2>/dev/null || true
-          done
-        fi
-        if [ -d "ghidra" ]; then
-          cp -r ghidra "${DIST_DIR}/headers/" 2>/dev/null || true
-        fi
-        if [ -d "subprojects" ]; then
-          cp -r subprojects "${DIST_DIR}/headers/" 2>/dev/null || true
-        fi
-
-        echo "=== Collecting Plugins (.so files) ==="
-        # Copy compiled .so plugin files from installation
-        find /tmp/r2ghidra-arm64-install -name "*.so*" -type f 2>/dev/null | while read plugin; do
-          cp "$plugin" "${DIST_DIR}/plugins/" 2>/dev/null || true
-          echo "Copied: $(basename $plugin)"
-        done
-
-        echo "=== Collecting Radare2 Libraries ==="
-        # Copy radare2 libraries
-        find /tmp/r2-arm64-install/lib -name "libr_*.so*" -type f 2>/dev/null | while read lib; do
-          cp "$lib" "${DIST_DIR}/libs/" 2>/dev/null || true
-          echo "Copied: $(basename $lib)"
-        done
-
-        echo "=== Collecting Object Files (.o) ==="
-        # Copy all compiled .o object files
-        find . -name "*.o" -type f 2>/dev/null | while read obj_file; do
-          rel_path=$(echo "$obj_file" | sed 's|^\./||')
-          dir_path=$(dirname "$rel_path")
-          mkdir -p "${DIST_DIR}/objects/${dir_path}"
-          cp "$obj_file" "${DIST_DIR}/objects/${rel_path}"
-        done
-
-        echo "=== Collecting Sleigh Archives ==="
-        # Copy Sleigh ZIP archive if it exists
-        find . -name "r2ghidra_sleigh-*.zip" -type f 2>/dev/null | while read sleigh; do
-          cp "$sleigh" "${DIST_DIR}/sleigh/"
-          echo "Copied: $(basename $sleigh)"
-        done
-
-        echo "=== Creating MANIFEST.txt ==="
-        # Create comprehensive MANIFEST.txt with build metadata
-        cat > "${DIST_DIR}/MANIFEST.txt" << 'EOF'
-r2ghidra Linux ARM64 Cross-Compiled Distribution
-===============================================
-
-Build Information:
-  Build Date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
-  Architecture: ARM64 (aarch64) - CROSS-COMPILED
-  Build System: GNU ACR + Make with ARM64 cross-toolchain
-  Radare2 Version: 6.1.8
-  Target: Linux ARM64 (aarch64-linux-gnu)
-  Build Host: Ubuntu 22.04 x86_64
-  Build Method: Cross-compilation using aarch64 target triplet
-
-Cross-Compilation Toolchain:
-  Primary Compiler: gcc-aarch64-linux-gnu / g++-aarch64-linux-gnu
-  Binutils: binutils-aarch64-linux-gnu
-  
-  Environment Variables Set:
-    CC: aarch64-linux-gnu-gcc
-    CXX: aarch64-linux-gnu-g++
-    AR: aarch64-linux-gnu-ar
-    LD: aarch64-linux-gnu-ld
-    CFLAGS: -O2 -march=armv8-a
-    CXXFLAGS: -O2 -march=armv8-a
-
-  Configure Flags:
-    Radare2: --prefix=/tmp/r2-arm64-install --host=aarch64-linux-gnu --enable-shared
-    r2ghidra: --prefix=/tmp/r2ghidra-arm64-install --host=aarch64-linux-gnu
-
-Artifact Structure:
-  headers/     - All .h header files with original directory structure
-                 ├── src/         (Core r2ghidra headers)
-                 ├── ghidra/      (Sleigh/Ghidra headers)
-                 └── subprojects/ (Third-party headers: pugixml, etc.)
-
-  plugins/     - Cross-compiled r2ghidra plugin files (.so)
-                 └── All r2ghidra plugin shared objects
-
-  libs/        - Radare2 ARM64 libraries (.so files)
-                 ├── libr_asm.so
-                 ├── libr_core.so
-                 ├── libr_anal.so
-                 └── ... (other radare2 libraries)
-
-  objects/     - Cross-compiled object files (.o)
-                 ├── src/         (Core r2ghidra objects)
-                 ├── ghidra/      (Ghidra/Decompiler objects)
-                 └── subprojects/ (Third-party compiled objects: pugixml.o, etc.)
-
-  sleigh/      - Precompiled Sleigh architecture definitions
-                 └── r2ghidra_sleigh-*.zip
-
-Installation Instructions:
-  For ARM64 Linux Systems (Raspberry Pi, NVIDIA Jetson, etc.):
-  
-  1. Extract the archive on target ARM64 system:
-     tar xzf r2ghidra-linux-arm64-full.tar.gz
-     
-  2. Install libraries:
-     sudo cp libs/* /usr/local/lib/
-     sudo ldconfig
-     
-  3. Install plugins:
-     sudo cp plugins/* /usr/lib/radare2/plugins/
-     
-  4. Install headers (optional, for development):
-     sudo cp -r headers/* /usr/include/
-     
-  5. Verify installation:
-     r2 -L | grep ghidra
-     r2 -H | grep Ghidra
-
-Compatibility:
-  Target: ARM64 (aarch64) 64-bit Linux systems
-  Tested on: Debian/Ubuntu based ARM64 systems
-  Compatible Devices: 
-    - Raspberry Pi 4/5 (with 64-bit OS)
-    - NVIDIA Jetson Xavier/Orin
-    - AWS Graviton instances
-    - Other ARM64 Linux systems
-
-Build Features:
-  ✓ Cross-compiled from x86_64 host
-  ✓ Optimized for ARMv8-A architecture
-  ✓ Full object files for static linking
-  ✓ Complete header hierarchy for development
-  ✓ Precompiled Sleigh processor definitions
-  ✓ Ready for immediate deployment
-
-Build Artifacts Generated:
-  - r2ghidra-linux-arm64-full.tar.gz  (Full distribution archive)
-  - r2ghidra-linux-arm64-full.zip     (Alternate archive format)
-  - r2ghidra-linux-arm64-full.sha256  (Checksums for verification)
-  - Separate artifact uploads for plugins, headers, objects, and sleigh
-
-Builder: GitHub Actions (ubuntu-22.04 with ARM64 cross-toolchain)
-Repository: KaliRootSuperUser/r2ghidra
-EOF
-
-        echo "Distribution structure created successfully"
+        mkdir -p "${DIST_DIR}/headers" "${DIST_DIR}/plugins" "${DIST_DIR}/objects" "${DIST_DIR}/libs"
+        echo "=== Collecting artifacts ==="
+        [ -d "src" ] && find src -name "*.h" -type f | head -10 | xargs -I {} cp --parents {} "${DIST_DIR}/headers/" 2>/dev/null || true
+        [ -d "ghidra" ] && cp -r ghidra "${DIST_DIR}/headers/" 2>/dev/null || true
+        find /tmp/r2ghidra-arm64-install -name "*.so*" -type f 2>/dev/null | xargs -I {} cp {} "${DIST_DIR}/plugins/" 2>/dev/null || true
+        find /tmp/r2-arm64-install/lib -name "libr_*.so*" -type f 2>/dev/null | xargs -I {} cp {} "${DIST_DIR}/libs/" 2>/dev/null || true
+        echo "Artifact structure created"
         ls -lah "${DIST_DIR}/"
-        echo ""
-        echo "=== Artifact Contents Summary ==="
-        echo "Headers: $(find ${DIST_DIR}/headers -type f | wc -l) files"
-        echo "Plugins: $(find ${DIST_DIR}/plugins -type f | wc -l) files"
-        echo "Libraries: $(find ${DIST_DIR}/libs -type f | wc -l) files"
-        echo "Objects: $(find ${DIST_DIR}/objects -type f | wc -l) files"
-        echo "Sleigh: $(find ${DIST_DIR}/sleigh -type f | wc -l) files"
 
-    - name: Creating final compressed archives
+    - name: Creating compressed archives
+      if: success()
       run: |
         cd artifacts
-        echo "Creating tar.gz archive..."
         tar -czf r2ghidra-linux-arm64-full.tar.gz r2ghidra-linux-arm64-full/
-        echo "Creating zip archive..."
-        zip -r r2ghidra-linux-arm64-full.zip r2ghidra-linux-arm64-full/ -q
-        echo ""
-        echo "=== Archive Information ==="
-        ls -lh r2ghidra-linux-arm64-full.*
+        ls -lh r2ghidra-linux-arm64-full.tar.gz
         cd ..
 
-    - name: Generate checksums
-      run: |
-        cd artifacts
-        echo "=== Generating SHA256 Checksums ==="
-        sha256sum r2ghidra-linux-arm64-full.tar.gz > r2ghidra-linux-arm64-full.sha256
-        sha256sum r2ghidra-linux-arm64-full.zip >> r2ghidra-linux-arm64-full.sha256
-        echo ""
-        cat r2ghidra-linux-arm64-full.sha256
-        cd ..
-
-    - name: Uploading ARM64 full distribution (tar.gz)
+    - name: Upload ARM64 distribution
+      if: success()
       uses: actions/upload-artifact@v7
       with:
         name: linux-arm64-full
         path: artifacts/r2ghidra-linux-arm64-full.tar.gz
-        retention-days: 30
-
-    - name: Uploading ARM64 full distribution (zip)
-      uses: actions/upload-artifact@v7
-      with:
-        name: linux-arm64-full-zip
-        path: artifacts/r2ghidra-linux-arm64-full.zip
-        retention-days: 30
-
-    - name: Uploading ARM64 checksums
-      uses: actions/upload-artifact@v7
-      with:
-        name: linux-arm64-checksums
-        path: artifacts/r2ghidra-linux-arm64-full.sha256
-        retention-days: 30
-
-    - name: Uploading ARM64 plugins
-      uses: actions/upload-artifact@v7
-      with:
-        name: linux-arm64-plugins
-        path: artifacts/r2ghidra-linux-arm64-full/plugins/
-        retention-days: 30
-
-    - name: Uploading ARM64 headers
-      uses: actions/upload-artifact@v7
-      with:
-        name: linux-arm64-headers
-        path: artifacts/r2ghidra-linux-arm64-full/headers/
-        retention-days: 30
-
-    - name: Uploading ARM64 objects
-      uses: actions/upload-artifact@v7
-      with:
-        name: linux-arm64-objects
-        path: artifacts/r2ghidra-linux-arm64-full/objects/
-        retention-days: 30
-
-    - name: Uploading ARM64 libraries
-      uses: actions/upload-artifact@v7
-      with:
-        name: linux-arm64-libraries
-        path: artifacts/r2ghidra-linux-arm64-full/libs/
-        retention-days: 30
-
-    - name: Uploading ARM64 sleigh
-      uses: actions/upload-artifact@v7
-      with:
-        name: linux-arm64-sleigh
-        path: artifacts/r2ghidra-linux-arm64-full/sleigh/
         retention-days: 30
 
   w64:
@@ -583,6 +365,3 @@ EOF
             dist/artifacts/tarball/r2ghidra-${{ steps.r2gv.outputs.branch }}.tar.xz
             dist/artifacts/linux-acr-ok/r2ghidra_sleigh-${{ steps.r2gv.outputs.branch }}.zip
             dist/artifacts/linux-arm64-full/r2ghidra-linux-arm64-full.tar.gz
-            dist/artifacts/linux-arm64-full-zip/r2ghidra-linux-arm64-full.zip
-            dist/artifacts/linux-arm64-checksums/r2ghidra-linux-arm64-full.sha256
-            dist/artifacts/linux-arm64-sleigh/r2ghidra_sleigh-*.zip
