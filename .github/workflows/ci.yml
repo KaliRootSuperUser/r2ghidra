@@ -422,3 +422,4 @@ EOF
             dist/artifacts/linux-arm64-full/r2ghidra-linux-arm64-full.tar.gz
             dist/artifacts/linux-arm64-full-zip/r2ghidra-linux-arm64-full.zip
             dist/artifacts/linux-arm64-sleigh/r2ghidra_sleigh-${{ steps.r2gv.outputs.branch }}.zip
+
